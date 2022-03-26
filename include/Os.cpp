@@ -8,12 +8,12 @@
 #include "FenNiaoAsk03.h"
 DynamicJsonDocument globalDoc(2054);
 JsonObject globalc = globalDoc.to<JsonObject>();
-JsonObject websocketCli = globalc.createNestedObject("websocketCli");
-JsonObject WebsocketServe = globalc.createNestedObject("WebsocketServe");
-JsonObject wifiCli = globalc.createNestedObject("wifiCli");
-JsonObject wifiServe = globalc.createNestedObject("wifiServe");
-JsonObject kenWeis = globalc.createNestedObject("kenWeis");
-JsonObject fangjian = globalc.createNestedObject("fangjian");
+JsonObject websocketCliConfig = globalc.createNestedObject("websocketCli");
+JsonObject WebsocketServeConfig = globalc.createNestedObject("WebsocketServe");
+JsonObject wifiCliConfig = globalc.createNestedObject("wifiCli");
+JsonObject wifiServeConfig = globalc.createNestedObject("wifiServe");
+JsonObject fangjianConfig = globalc.createNestedObject("fangjian");
+JsonObject kenWeisConfig = globalc.createNestedObject("kenWeis");
 class Os
 {
 private:
@@ -39,84 +39,102 @@ private:
     void hallLedLoop(){
 
     };
+    const String globalFileName = "/global.json";
     void globalDocInit(void)
     {
-        websocketCli["uri"] = "8080";
-        WebsocketServe["port"] = "8080";
-        wifiCli["ssid"] = "920wifi";
-        wifiCli["password"] = "12345678@";
-        wifiServe["name"] = "8080test";
-        wifiServe["ssid"] = "8080";
-        wifiServe["password"] = "8080";
-        fangjian["floor"] = "1";
-        fangjian["name"] = "1-2A";
-        fangjian["sex"] = "boy";
-        fangjian["kengshu"] = 12;
-        fangjian["kenging"] = 0;
-        serializeJson(globalDoc, Serial);
-    };
-    static void kenWeisSet(bool isAdd, String id, bool state)
-    {
-        DynamicJsonDocument obj(255);
-        obj["id"] = id;
-        obj["state"] = state;
-        globalDoc["kenWeis"].getMember(id);
-        if (isAdd || globalDoc["kenWeis"].containsKey(id))
+        while (!SPIFFS.begin(true))
         {
-            globalDoc["kenWeis"][id].set(obj);
+            Serial.print("...SPIFFS.begin()");
+            delay(200);
         }
-        // serializeJson(globalDoc, Serial); //打印
-        serializeJsonPretty(globalDoc, Serial); //带格式打印
-    };
-    const String globalFileName = "/global.json";
-    String SPIFFSMsg = "SPIFFS loadIng";
-    void SPIFFSinit()
-    {
-        if (!SPIFFS.begin(true))
+
+        // serializeJson(globalDoc, Serial);
+        if (SPIFFS.exists(globalFileName) == true)
         {
-            SPIFFSMsg = "SPIFFS error";
+            File file = SPIFFS.open(globalFileName);
+            String c = file.readString();
+            deserializeJson(globalDoc, c);
+            file.close();
         }
         else
         {
-            SPIFFSMsg = "SPIFFS success";
+            websocketCliConfig["uri"] = "8080";
+            WebsocketServeConfig["port"] = "8080";
+            wifiCliConfig["ssid"] = "920wifi";
+            wifiCliConfig["password"] = "12345678@";
+            wifiServeConfig["name"] = "8080test";
+            wifiServeConfig["ssid"] = "8080";
+            wifiServeConfig["password"] = "8080";
+            fangjianConfig["floor"] = "1";
+            fangjianConfig["name"] = "1-2A";
+            fangjianConfig["sex"] = "boy";
+            fangjianConfig["kengadd"] = true;
+            fangjianConfig["kengshu"] = 12;
+            fangjianConfig["renshu"] = 0;
         }
-    };
-    void globalDocFromFileRead()
-    {
-        File file = SPIFFS.open(globalFileName);
-        String str = "";
-        if (file && file.isDirectory())
-        {
-            while (file.available())
-            {
-                str += file.read();
-            }
-            DeserializationError error = deserializeJson(globalDoc, str); //反序列化
-            if (error)
-            {
-                Serial.println("deserializeJson error");
-            }
-        }
-        file.close();
     };
     void globalDocToFileWrite()
     {
+        while (!SPIFFS.begin(true))
+        {
+            Serial.print("...SPIFFS.begin()");
+            delay(200);
+        }
+        // Serial.printf("SPIFFS1 totalBytes: %d \r\n", SPIFFS.totalBytes());
+        // Serial.printf("SPIFFS1 usedBytes: %d \r\n", SPIFFS.usedBytes());
         File file = SPIFFS.open(globalFileName, FILE_WRITE);
-        if (!file)
-        {
-            Serial.println("- failed to open file for writing");
-            return;
-        }
-        if (file.print("{}"))
-        {
-            Serial.println("- file written");
-        }
-        else
-        {
-            Serial.println("- write failed");
-        }
+        String c;
+        serializeJson(globalDoc, c);
+        file.print(c);
         file.close();
     };
+    void apiInit(){};
+    void apiOn(){};
+    static void kenWeisSet(String id, bool state)
+    {
+        // globalDoc["kenWeis"].getMember(id);
+        if (kenWeisConfig.containsKey(id))
+        {
+            kenWeisConfig[id]["state"] = state;
+        }
+        else if (fangjianConfig["kengadd"])
+        {
+            kenWeisConfig.createNestedObject(id);
+            kenWeisConfig[id]["state"] = state;
+        }
+    };
+    static void kenWeisFromYbl(YBLEMR03Uart::ParseRx7e v)
+    {
+        String id = "ybl" + String(v.id);
+        String type = String(v.type);
+        bool state = false;
+        if (type == "1")
+        {
+            //门磁
+            state = String(v.state) == "8" ? true : false;
+            kenWeisSet(id, state);
+        }
+        else if (type == "2")
+        {
+            //英式按钮
+            state = String(v.state) == "1" ? true : false;
+            kenWeisSet(id, state);
+        }
+    }
+    static void kenWeisFromFendNiao(FenNiaoAsk03::ParseDb v)
+    {
+        String id = "x1";
+        String cid = String(v.id);
+        if (cid == "13217070")
+        {
+            kenWeisSet(id, true); //门磁合并
+        }
+        else if (cid == "13217060")
+        {
+            kenWeisSet(id, false); //门磁分离
+        }
+    };
+
     WiFiAPClass WiFiAP;
     void wifiServeInit()
     {
@@ -156,7 +174,6 @@ private:
         Serial.print("softAP StationNum: ");
         Serial.println(WiFiAP.softAPgetStationNum());
     };
-
     void wifiCliInit()
     {
         const char *wifi_SSID = "920wifi";       //设置连接的wifi名称信息
@@ -177,91 +194,59 @@ private:
             Serial.println("WIFI STA Success");
         }
     };
-    static void fromYbl(YBLEMR03Uart::ParseRx7e v)
-    {
-        String id = "ybl" + String(v.id);
-        String type = String(v.type);
-        bool state = false;
-        if (type == "1")
-        {
-            state = String(v.state) == "8" ? true : false;
-            kenWeisSet(true, id, state);
-        }
-        else if (type == "2")
-        {
-            state = String(v.state) == "1" ? true : false;
-            kenWeisSet(true, id, state);
-        }
-    }
-    static void fromFendNiao(FenNiaoAsk03::ParseDb v)
-    {
-        String id = "x1";
-        String cid = String(v.id);
-        if (cid == "13217070")
-        {
-            kenWeisSet(true, id, true); //门磁合并
-        }
-        else if (cid == "13217060")
-        {
-            kenWeisSet(true, id, false); //门磁分离
-        }
-    };
-    static void sendToLaozhou(void)
-    {
-        JsonObject laozhouObj = globalDoc["fangjian"];
-        laozhouObj["louceng"] = "1";
-        laozhouObj["Name"] = "1-2A";
-        laozhouObj["renshu"] = laozhouObj["kenging"];
-        serializeJsonPretty(laozhouObj, Serial);
-    };
-    unsigned long sendTolastTime = 0;
-    void sendToloop(void)
+    unsigned long fangjianSendTolastTime = 0;
+    void fangjianLoopTo(void)
     {
         unsigned long now = millis();
-        if (now - sendTolastTime > 1000)
+        if (now - fangjianSendTolastTime > 1000)
         {
             unsigned int nowRenshu = 0;
-            JsonObject kenWeisInfo = globalDoc["kenWeis"];
-            for (auto kv : kenWeisInfo)
+            for (auto kv : kenWeisConfig)
             {
-                if (kv.value()["state"])
+                if (kv.value()["state"] == true)
                 {
                     nowRenshu += 1;
                 };
             };
-            globalDoc["fangjian"]["kenging"] = nowRenshu;
-            sendToLaozhou();
-            sendTolastTime = now;
+            fangjianConfig["renshu"] = nowRenshu;
+            // serializeJson(globalDoc, Serial); //打印
+            serializeJsonPretty(globalDoc, Serial); //带格式打印
+            fangjianSendTolastTime = now;
         }
     }
 
 public:
     Os(void)
     {
-        Serial.begin(1200);
-        // SPIFFSinit();
+        Serial.begin(9600);
         // wifiCliInit();
         // wifiServeInit();
-        iYbl = new YBLEMR03Uart(new HardwareSerial(1), 23);
-        iFenNiaoAsk03 = new FenNiaoAsk03(new RCSwitch(), 25);
+        // iYbl = new YBLEMR03Uart(new HardwareSerial(1), 23);
+        // iFenNiaoAsk03 = new FenNiaoAsk03(new RCSwitch(), 25);
         //  ESP.restart();//重启
         //  ESP.getFreeHeap();//剩余内存
         globalDocInit();
-        //  globalDocFromFileRead();
-        //  hallLedInit();
+        // globalDocToFileWrite();
+        //   globalDocFromFileRead();
+        //   hallLedInit();
     };
     void loop()
     {
+        Serial.println(SPIFFS.exists(globalFileName) ? "y" : "n");
+        delay(1000);
+        globalDocToFileWrite();
+        delay(1000);
+        deserializeJson(globalDoc,Serial);
+        //  serializeJson(globalDoc, Serial);
         // wifiServeStatePrint();
-        delay(100);
-        iYbl->parseRx7e(fromYbl);
-        delay(5);
-        iFenNiaoAsk03->available(fromFendNiao);
-        delay(5);
-        // hallStateLoop();
-        // hallLedLoop();
-        // delay(5);
-        sendToloop();
-        // serializeJson(globalDoc, Serial);
+        //  iYbl->parseRx7e(kenWeisFromYbl);
+        //  delay(5);
+        //  iFenNiaoAsk03->available(kenWeisFromFendNiao);
+        //  delay(5);
+        //  hallStateLoop();
+        //  hallLedLoop();
+        //  delay(5);
+        //  fangjianLoopTo();
+        //  serializeJson(globalDoc, Serial);
     };
 };
